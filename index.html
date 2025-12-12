@@ -41,11 +41,12 @@
             cursor: crosshair;
         }
 
-        /* overlays stay the same */
+        /* Hover readout: top-left, below instructions */
         #info {
-            position: absolute;
+            position: fixed;
             left: 10px;
-            top: 10px;
+            top: 48px;
+            /* below instructions */
             padding: 6px 10px;
             background: rgba(0, 0, 0, 0.6);
             color: #fff;
@@ -55,8 +56,9 @@
             white-space: nowrap;
         }
 
+        /* Legend: bottom-right */
         #legend {
-            position: absolute;
+            position: fixed;
             right: 10px;
             bottom: 10px;
             padding: 6px 10px;
@@ -66,17 +68,18 @@
             border-radius: 4px;
         }
 
+        /* Legend bar unchanged */
         #legendBar {
             width: 200px;
             height: 12px;
             margin-bottom: 4px;
-            /* reversed: red → yellow → green → cyan → blue */
             background: linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff);
         }
 
+        /* Instructions: top-center */
         #instructions {
-            position: absolute;
-            top: 4px;
+            position: fixed;
+            top: 8px;
             left: 50%;
             transform: translateX(-50%);
             background: rgba(0, 0, 0, 0.75);
@@ -376,7 +379,7 @@
                 age == null || !isFinite(age) ? "no data" : age.toFixed(1) + " " + units;
 
             info.textContent =
-                "Lonitude " + lon.toFixed(1) +
+                "Longitude " + lon.toFixed(1) +
                 "° | Age: " + ageText;
         }
 
