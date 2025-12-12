@@ -117,6 +117,9 @@
         let lineEnd = null;     // {x, y}
         let tickCount = 8;      // default number of tick marks
 
+        // offscreen canvas for the base map
+        const mapCanvas = document.createElement("canvas");
+        const mapCtx = mapCanvas.getContext("2d");
 
         // Load the preprocessed JSON grid
         fetch("age_SAtl_6m.json")
@@ -144,13 +147,69 @@
 
         function resizeCanvas() {
             if (!grid) return;
+
             const rect = canvas.getBoundingClientRect();
-            const dpr = window.devicePixelRatio || 1;
-            canvas.width = rect.width * dpr;
-            canvas.height = rect.height * dpr;
-            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+            // Make both canvases the same pixel size
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+            mapCanvas.width = rect.width;
+            mapCanvas.height = rect.height;
+
+            renderMapToOffscreen();
             redraw();
         }
+
+
+        function renderMapToOffscreen() {
+            if (!grid) return;
+
+            const lons = grid.lon;
+            const lats = grid.lat;
+            const data = grid.data;
+
+            const lonMin = grid.lonMin;
+            const lonMax = grid.lonMax;
+            const latMin = grid.latMin;
+            const latMax = grid.latMax;
+
+            const width = mapCanvas.width;
+            const height = mapCanvas.height;
+
+            mapCtx.clearRect(0, 0, width, height);
+
+            const maxAge = estimateMaxFinite(data, 200);
+
+            for (let j = 0; j < lats.length; j++) {
+                const lat = lats[j];
+                const latNext = lats[Math.min(j + 1, lats.length - 1)];
+
+                // Map cropped lat range to full canvas height
+                const y1 = ((latMax - lat) / (latMax - latMin)) * height;
+                const y2 = ((latMax - latNext) / (latMax - latMin)) * height;
+                const yTop = Math.min(y1, y2);
+                const yBottom = Math.max(y1, y2);
+                const cellH = yBottom - yTop;
+
+                for (let i = 0; i < lons.length; i++) {
+                    const age = data[j][i];
+                    if (age === null || isNaN(age)) continue;
+
+                    const lon = lons[i];
+                    const lonNext = lons[Math.min(i + 1, lons.length - 1)];
+
+                    // Map cropped lon range to full canvas width
+                    const x1 = ((lon - lonMin) / (lonMax - lonMin)) * width;
+                    const x2 = ((lonNext - lonMin) / (lonMax - lonMin)) * width;
+                    const cellW = x2 - x1;
+
+                    mapCtx.fillStyle = ageToColor(age, maxAge);
+                    mapCtx.fillRect(x1, yTop, cellW, cellH);
+                }
+            }
+        }
+
+
 
         function drawAgeMap() {
             if (!grid) return;
@@ -317,7 +376,7 @@
                 age == null || !isFinite(age) ? "no data" : age.toFixed(1) + " " + units;
 
             info.textContent =
-                "Lat " + lat.toFixed(1) + "°, Lon " + lon.toFixed(1) +
+                "Lonitude " + lon.toFixed(1) +
                 "° | Age: " + ageText;
         }
 
@@ -330,8 +389,10 @@
         });
 
         canvas.addEventListener("mousemove", (e) => {
-            // keep existing hover behaviour
-            handleMouseMove(e);
+            // Only do expensive hover lookup when not dragging
+            if (!lineMode || !isDraggingLine) {
+                handleMouseMove(e);
+            }
 
             if (lineMode && isDraggingLine) {
                 const { x, y } = getCanvasCoords(e);
@@ -339,6 +400,7 @@
                 redraw();
             }
         });
+
 
         canvas.addEventListener("mouseup", (e) => {
             if (!lineMode || !isDraggingLine) return;
@@ -405,11 +467,18 @@
         }
 
         function redraw() {
-            drawAgeMap();
+            const width = canvas.width;
+            const height = canvas.height;
+
+            ctx.clearRect(0, 0, width, height);
+            ctx.drawImage(mapCanvas, 0, 0, width, height); // no extra scaling
+
             if (lineStart && lineEnd) {
                 drawLineWithTicks();
             }
         }
+
+
     </script>
 </body>
 
