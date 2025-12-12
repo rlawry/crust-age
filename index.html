@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Seafloor Age – Interactive Viewer</title>
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+        }
+
+        /* No flexbox, so page can scroll if needed */
+        body {
+            font-family: system-ui, sans-serif;
+            color: #fff;
+        }
+
+        /* Fixed-aspect container, centered horizontally, with margins */
+        #container {
+            position: relative;
+
+            /* overall size control */
+            width: min(90vw, 1200px);
+
+            /* keep map shape: 90° lon / 80° lat */
+            aspect-ratio: 90 / 80;
+
+            /* center horizontally, add space at top/bottom */
+            margin: 20px auto;
+        }
+
+        /* Canvas fills container, which now defines the aspect ratio */
+        #ageCanvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            background: #111;
+            cursor: crosshair;
+        }
+
+        /* overlays stay the same */
+        #info {
+            position: absolute;
+            left: 10px;
+            top: 10px;
+            padding: 6px 10px;
+            background: rgba(0, 0, 0, 0.6);
+            color: #fff;
+            font-size: 13px;
+            border-radius: 4px;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+
+        #legend {
+            position: absolute;
+            right: 10px;
+            bottom: 10px;
+            padding: 6px 10px;
+            background: rgba(0, 0, 0, 0.6);
+            color: #fff;
+            font-size: 12px;
+            border-radius: 4px;
+        }
+
+        #legendBar {
+            width: 200px;
+            height: 12px;
+            margin-bottom: 4px;
+            /* reversed: red → yellow → green → cyan → blue */
+            background: linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff);
+        }
+
+        #instructions {
+            position: absolute;
+            top: 4px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.75);
+            color: #fff;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 13px;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="container">
+        <canvas id="ageCanvas"></canvas>
+        <div id="info">Loading data…</div>
+        <div id="legend">
+            <div id="legendBar"></div>
+            <div>Young &larr; Age of oceanic crust (Myr) &rarr; Old</div>
+        </div>
+        <div id="instructions"></div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("ageCanvas");
+        const ctx = canvas.getContext("2d");
+        const info = document.getElementById("info");
+
+        let grid = null;  // {lon, lat, data, units, var_name}
+
+        const instructions = document.getElementById("instructions");
+        instructions.textContent = "Press E to enter Line-Drawing Mode";
+
+        let lineMode = false;
+        let isDraggingLine = false;
+        let lineStart = null;   // {x, y} in canvas pixels
+        let lineEnd = null;     // {x, y}
+        let tickCount = 8;      // default number of tick marks
+
+
+        // Load the preprocessed JSON grid
+        fetch("age_SAtl_6m.json")
+            .then(r => r.json())
+            .then(data => {
+                grid = data;
+
+                // Compute local bounds for the cropped region
+                const lons = grid.lon;
+                const lats = grid.lat;
+                grid.lonMin = Math.min(...lons);
+                grid.lonMax = Math.max(...lons);
+                grid.latMin = Math.min(...lats);
+                grid.latMax = Math.max(...lats);
+
+                resizeCanvas();
+                window.addEventListener("resize", resizeCanvas);
+                canvas.addEventListener("mousemove", handleMouseMove);
+                info.textContent = "Move cursor to read age values";
+            })
+            .catch(err => {
+                console.error(err);
+                info.textContent = "Error loading age_SAtl_6m.json";
+            });
+
+        function resizeCanvas() {
+            if (!grid) return;
+            const rect = canvas.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            redraw();
+        }
+
+        function drawAgeMap() {
+            if (!grid) return;
+
+            const lons = grid.lon;
+            const lats = grid.lat;
+            const data = grid.data;
+
+            const lonMin = grid.lonMin;
+            const lonMax = grid.lonMax;
+            const latMin = grid.latMin;
+            const latMax = grid.latMax;
+
+            const dpr = window.devicePixelRatio || 1;
+            const width = canvas.width / dpr;
+            const height = canvas.height / dpr;
+
+            ctx.clearRect(0, 0, width, height);
+
+            const maxAge = estimateMaxFinite(data, 200);
+
+            for (let j = 0; j < lats.length; j++) {
+                const lat = lats[j];
+                const latNext = lats[Math.min(j + 1, lats.length - 1)];
+
+                // Map latitudes so that latMax is at the top of the canvas, latMin at the bottom
+                const y1 = ((latMax - lat) / (latMax - latMin)) * height;
+                const y2 = ((latMax - latNext) / (latMax - latMin)) * height;
+                const yTop = Math.min(y1, y2);
+                const yBottom = Math.max(y1, y2);
+                const cellH = yBottom - yTop;
+
+                for (let i = 0; i < lons.length; i++) {
+                    const age = data[j][i];
+                    if (age === null || isNaN(age)) continue;
+
+                    const lon = lons[i];
+                    const lonNext = lons[Math.min(i + 1, lons.length - 1)];
+
+                    // Map longitudes so lonMin is at the left, lonMax at the right
+                    const x1 = ((lon - lonMin) / (lonMax - lonMin)) * width;
+                    const x2 = ((lonNext - lonMin) / (lonMax - lonMin)) * width;
+                    const cellW = x2 - x1;
+
+                    ctx.fillStyle = ageToColor(age, maxAge);
+                    ctx.fillRect(x1, yTop, cellW, cellH);
+                }
+            }
+        }
+
+        function drawLineWithTicks() {
+            if (!lineStart || !lineEnd) return;
+
+            const x1 = lineStart.x;
+            const y1 = lineStart.y;
+            const x2 = lineEnd.x;
+            const y2 = lineEnd.y;
+
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const length = Math.hypot(dx, dy) || 1;
+
+            // Perpendicular unit vector for tick marks
+            const nx = -dy / length;
+            const ny = dx / length;
+            const halfTick = 6; // px
+
+            ctx.save();
+            ctx.strokeStyle = "white";
+            ctx.lineWidth = 2;
+
+            // main line
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+
+            // ticks, evenly spaced along the line (excluding endpoints)
+            for (let k = 1; k <= tickCount; k++) {
+                const t = k / (tickCount + 1);   // 0..1
+                const px = x1 + dx * t;
+                const py = y1 + dy * t;
+
+                ctx.beginPath();
+                ctx.moveTo(px - nx * halfTick, py - ny * halfTick);
+                ctx.lineTo(px + nx * halfTick, py + ny * halfTick);
+                ctx.stroke();
+            }
+
+            ctx.restore();
+        }
+
+        function estimateMaxFinite(data, defaultMax) {
+            let max = 0;
+            for (let j = 0; j < data.length; j++) {
+                const row = data[j];
+                for (let i = 0; i < row.length; i++) {
+                    const v = row[i];
+                    if (v != null && isFinite(v) && v > max) max = v;
+                }
+            }
+            return max || defaultMax;
+        }
+
+        // Simple multi-color scale: blue → cyan → green → yellow → red
+        function ageToColor(age, maxAge) {
+            if (!isFinite(age) || age < 0) {
+                return "rgba(0,0,0,0)";
+            }
+
+            // Reverse: small ages → t close to 1, large ages → t close to 0
+            const t = 1 - Math.min(age / maxAge, 1);
+
+            // Piecewise: 0–0.25 blue→cyan, 0.25–0.5 cyan→green,
+            //            0.5–0.75 green→yellow, 0.75–1 yellow→red
+            let r = 0, g = 0, b = 0;
+            if (t < 0.25) {
+                const u = t / 0.25;          // 0→1
+                r = 0;
+                g = Math.round(255 * u);
+                b = 255;
+            } else if (t < 0.5) {
+                const u = (t - 0.25) / 0.25;
+                r = 0;
+                g = 255;
+                b = Math.round(255 * (1 - u));
+            } else if (t < 0.75) {
+                const u = (t - 0.5) / 0.25;
+                r = Math.round(255 * u);
+                g = 255;
+                b = 0;
+            } else {
+                const u = (t - 0.75) / 0.25;
+                r = 255;
+                g = Math.round(255 * (1 - u));
+                b = 0;
+            }
+            return "rgb(" + r + "," + g + "," + b + ")";
+        }
+
+
+        function handleMouseMove(e) {
+            if (!grid) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;   // CSS pixels
+            const y = e.clientY - rect.top;
+
+            const lonMin = grid.lonMin;
+            const lonMax = grid.lonMax;
+            const latMin = grid.latMin;
+            const latMax = grid.latMax;
+
+            // Invert the mapping used in drawAgeMap()
+            const lon = lonMin + (x / rect.width) * (lonMax - lonMin);
+            const lat = latMax - (y / rect.height) * (latMax - latMin);
+
+            const i = nearestIndex(grid.lon, lon);
+            const j = nearestIndex(grid.lat, lat);
+            const age = grid.data[j][i];
+
+            const units = grid.units || "Myr";
+            const ageText =
+                age == null || !isFinite(age) ? "no data" : age.toFixed(1) + " " + units;
+
+            info.textContent =
+                "Lat " + lat.toFixed(1) + "°, Lon " + lon.toFixed(1) +
+                "° | Age: " + ageText;
+        }
+
+        canvas.addEventListener("mousedown", (e) => {
+            if (!lineMode) return;
+            isDraggingLine = true;
+            const { x, y } = getCanvasCoords(e);
+            lineStart = { x, y };
+            lineEnd = { x, y };
+        });
+
+        canvas.addEventListener("mousemove", (e) => {
+            // keep existing hover behaviour
+            handleMouseMove(e);
+
+            if (lineMode && isDraggingLine) {
+                const { x, y } = getCanvasCoords(e);
+                lineEnd = { x, y };
+                redraw();
+            }
+        });
+
+        canvas.addEventListener("mouseup", (e) => {
+            if (!lineMode || !isDraggingLine) return;
+            isDraggingLine = false;
+            const { x, y } = getCanvasCoords(e);
+            lineEnd = { x, y };
+            instructions.textContent =
+                "Press the up/down arrows to increase or decrease tick resolution";
+            redraw();
+        });
+
+        canvas.addEventListener("mouseleave", () => {
+            isDraggingLine = false;
+        });
+
+        window.addEventListener("keydown", (e) => {
+            // Enter line-drawing mode with E
+            if (e.key === "e" || e.key === "E") {
+                lineMode = true;
+                instructions.textContent = "Click and drag to draw a line across the Atlantic";
+                return;
+            }
+
+            // Up/down arrows adjust tick resolution (after a line exists)
+            if (!lineMode) return;
+            if (!lineStart || !lineEnd) return;
+
+            if (e.key === "ArrowUp") {
+                tickCount = Math.min(tickCount + 1, 100);
+            } else if (e.key === "ArrowDown") {
+                tickCount = Math.max(tickCount - 1, 1);
+            } else {
+                return;
+            }
+
+            instructions.textContent =
+                "Tick marks: " + tickCount +
+                "  |  Press the up/down arrows to increase or decrease tick resolution";
+
+            redraw();
+        });
+
+
+        function nearestIndex(arr, value) {
+            // Simple linear nearest (arrays are small after coarsening)
+            let best = 0;
+            let bestDiff = Math.abs(arr[0] - value);
+            for (let k = 1; k < arr.length; k++) {
+                const diff = Math.abs(arr[k] - value);
+                if (diff < bestDiff) {
+                    bestDiff = diff;
+                    best = k;
+                }
+            }
+            return best;
+        }
+
+        function getCanvasCoords(e) {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top
+            };
+        }
+
+        function redraw() {
+            drawAgeMap();
+            if (lineStart && lineEnd) {
+                drawLineWithTicks();
+            }
+        }
+    </script>
+</body>
+
+</html>
