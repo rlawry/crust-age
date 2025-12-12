@@ -100,7 +100,14 @@
             width: 200px;
             height: 12px;
             margin-bottom: 4px;
-            background: linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff);
+            /* approx Seton et al.: red → yellow → aqua → blue → violet → dark purple */
+            background: linear-gradient(to right,
+                    #a4262c,
+                    #fcc704,
+                    #9adbb8,
+                    #176fc1,
+                    #420186,
+                    #5c007d);
         }
 
         #lineModeButton {
@@ -164,7 +171,7 @@
             <option value="WNAmer">Western North America</option>
             <option value="WSAmer">Western South America</option>
             <option value="Hawaii">Hawaiian Region</option>
-            <option value="Mariana">Mariana Region</option>
+            <option value="Mariana">Japan/Mariana Region</option>
             <option value="Tonga">Tonga Region</option>
         </select>
     </div>
@@ -192,6 +199,7 @@
         instructions.textContent = "Press E or tap 'Line mode' to enter Line-Drawing Mode";
 
         let coast = null;  // coastline polylines
+        let coast10m = null; // 10m minor islands
 
         // region -> JSON file
         const REGION_FILES = {
@@ -216,16 +224,29 @@
         const mapCtx = mapCanvas.getContext("2d");
 
         function loadCoastlines() {
+            // 110m main coastlines
             fetch("coastlines_110m.json")
                 .then(r => r.json())
                 .then(data => {
-                    coast = data;   // { features: [ { lines: [ [ [lon,lat], ... ], ... ] }, ... ] }
-                    redraw();       // draw them when available
+                    coastMain = data;
+                    redraw();   // draw if grid is already loaded
                 })
                 .catch(err => {
                     console.error("Error loading coastlines_110m.json", err);
                 });
+
+            // 10m minor islands
+            fetch("ne_10m_coastline.json")
+                .then(r => r.json())
+                .then(data => {
+                    coast10m = data;
+                    redraw();
+                })
+                .catch(err => {
+                    console.error("Error loading ne_10m_coastline.json", err);
+                });
         }
+
 
         function loadRegion(key) {
             const file = REGION_FILES[key];
@@ -299,7 +320,7 @@
                     const age = row[i];
                     if (age === null || isNaN(age)) continue;
 
-                    mapCtx.fillStyle = ageToColor(age, maxAge);
+                    mapCtx.fillStyle = ageToColor(age);
                     mapCtx.fillRect(i, y, 1, 1);
                 }
             }
@@ -374,40 +395,57 @@
             return max || defaultMax;
         }
 
-        function ageToColor(age, maxAge) {
+        // Approximate Seton et al. (2020) colour scale
+        // 0 Myr = red, ~40 = yellow, ~90 = aqua, ~130 = blue, >~200 = purple
+        const MAX_AGE_FOR_COLOR = 340;  // clamp here
+
+        const COLOR_STOPS = [
+            { t: 0.00, r: 164, g: 38, b: 44 }, // young ridge: deep red
+            { t: 0.15, r: 252, g: 199, b: 4 }, // orange-yellow
+            { t: 0.35, r: 154, g: 219, b: 184 }, // light aqua
+            { t: 0.50, r: 23, g: 111, b: 193 }, // blue
+            { t: 0.70, r: 66, g: 1, b: 134 }, // violet
+            { t: 1.00, r: 92, g: 0, b: 125 }, // dark purple (oldest)
+        ];
+
+        function ageToColor(age) {
             if (!isFinite(age) || age < 0) {
                 return "rgba(0,0,0,0)";
             }
 
-            const t = 1 - Math.min(age / maxAge, 1);
+            // normalise age to 0–1 using a fixed max
+            const tRaw = age / MAX_AGE_FOR_COLOR;
+            const t = Math.max(0, Math.min(tRaw, 1));
 
-            let r = 0, g = 0, b = 0;
-            if (t < 0.25) {
-                const u = t / 0.25;
-                r = 0;
-                g = Math.round(255 * u);
-                b = 255;
-            } else if (t < 0.5) {
-                const u = (t - 0.25) / 0.25;
-                r = 0;
-                g = 255;
-                b = Math.round(255 * (1 - u));
-            } else if (t < 0.75) {
-                const u = (t - 0.5) / 0.25;
-                r = Math.round(255 * u);
-                g = 255;
-                b = 0;
-            } else {
-                const u = (t - 0.75) / 0.25;
-                r = 255;
-                g = Math.round(255 * (1 - u));
-                b = 0;
+            // find segment [s0, s1] with s0.t <= t <= s1.t
+            let s0 = COLOR_STOPS[0];
+            for (let i = 1; i < COLOR_STOPS.length; i++) {
+                const s1 = COLOR_STOPS[i];
+                if (t <= s1.t) {
+                    const u = (t - s0.t) / (s1.t - s0.t);
+                    const r = Math.round(s0.r + u * (s1.r - s0.r));
+                    const g = Math.round(s0.g + u * (s1.g - s0.g));
+                    const b = Math.round(s0.b + u * (s1.b - s0.b));
+                    return `rgb(${r},${g},${b})`;
+                }
+                s0 = s1;
             }
-            return "rgb(" + r + "," + g + "," + b + ")";
+
+            const last = COLOR_STOPS[COLOR_STOPS.length - 1];
+            return `rgb(${last.r},${last.g},${last.b})`;
         }
 
+
         function drawCoastlines() {
-            if (!grid || !coast || !coast.features) return;
+            // main 110m coastlines
+            //drawCoastlineSet(coastMain, 1.2, "white", 0.9);
+
+            // 10m coastline on top (slightly thinner)
+            drawCoastlineSet(coast10m, 1.0, "white", 0.9);
+        }
+
+        function drawCoastlineSet(coastData, lineWidth, strokeStyle, alpha) {
+            if (!grid || !coastData || !coastData.features) return;
 
             const width = canvas.width;
             const height = canvas.height;
@@ -418,11 +456,11 @@
             const latMax = grid.latMax;
 
             ctx.save();
-            ctx.lineWidth = 1.0;
-            ctx.strokeStyle = "white";
-            ctx.globalAlpha = 0.9;
+            ctx.lineWidth = lineWidth;
+            ctx.strokeStyle = strokeStyle;
+            ctx.globalAlpha = alpha;
 
-            for (const feature of coast.features) {
+            for (const feature of coastData.features) {
                 const lines = feature.lines;
                 if (!lines) continue;
 
@@ -433,7 +471,6 @@
                     let first = true;
 
                     for (const [lon, lat] of line) {
-                        // map lon/lat into canvas coordinates
                         const x = (lon - lonMin) / (lonMax - lonMin) * width;
                         const y = (latMax - lat) / (latMax - latMin) * height;
 
