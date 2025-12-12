@@ -300,6 +300,23 @@
         const mapCanvas = document.createElement("canvas");
         const mapCtx = mapCanvas.getContext("2d");
 
+        const INSTR_ENTER = "Press E or tap 'Line mode' to enter Line-Drawing Mode";
+        const INSTR_LINE = "Line mode: drag to draw a line (tap button again to exit)";
+        const INSTR_READ = "Move cursor or touch to read age values";
+
+        function setLineMode(on) {
+            lineMode = !!on;
+
+            // stop any in-progress drag when switching modes
+            isDraggingLine = false;
+
+            // UI state
+            lineModeButton.classList.toggle("active", lineMode);
+
+            // Instructions
+            instructions.textContent = lineMode ? INSTR_LINE : INSTR_READ;
+        }
+
         function loadCoastlines() {
             // 110m main coastlines
             fetch("coastlines_110m.json")
@@ -329,15 +346,12 @@
             if (!file) return;
 
             info.textContent = "Loading data…";
-            instructions.textContent = "Press E or tap 'Line mode' to enter Line-Drawing Mode";
 
             // reset line state
-            lineMode = false;
-            isDraggingLine = false;
+            setLineMode(false);
             lineStart = null;
             lineEnd = null;
             tickCount = 8;
-            lineModeButton.classList.remove("active");
 
             fetch(file)
                 .then(r => r.json())
@@ -625,8 +639,8 @@
             isDraggingLine = false;
             const { x, y } = getCanvasCoords(e);
             lineEnd = { x, y };
-            instructions.textContent =
-                "Press ↑/↓ to change tick resolution (desktop)";
+            if (lineMode) instructions.textContent = "Press ↑/↓ to change tick resolution (desktop)";
+
             redraw();
         });
 
@@ -674,8 +688,8 @@
                     lineEnd = { x, y };
                 }
                 isDraggingLine = false;
-                instructions.textContent =
-                    "Use ↑/↓ (desktop) to change tick resolution";
+                if (lineMode) instructions.textContent = "Use ↑/↓ (desktop) to change tick resolution";
+
                 redraw();
             }
             e.preventDefault();
@@ -689,9 +703,7 @@
         // keyboard: E and arrows
         window.addEventListener("keydown", (e) => {
             if (e.key === "e" || e.key === "E") {
-                lineMode = true;
-                lineModeButton.classList.add("active");
-                instructions.textContent = "Click or touch and drag to draw a line";
+                setLineMode(!lineMode);
                 e.preventDefault();
                 return;
             }
@@ -716,9 +728,7 @@
         });
 
         lineModeButton.addEventListener("click", () => {
-            lineMode = true;
-            lineModeButton.classList.add("active");
-            instructions.textContent = "Click or touch and drag to draw a line";
+            setLineMode(!lineMode);
         });
 
         regionSelect.addEventListener("change", (e) => {
