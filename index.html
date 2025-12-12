@@ -86,7 +86,7 @@
         }
 
         #legend {
-            position: fixed;
+            position: absolute;
             right: 10px;
             bottom: 10px;
             padding: 6px 10px;
@@ -148,8 +148,12 @@
 <body>
     <div id="container">
         <canvas id="ageCanvas"></canvas>
-    </div>
 
+        <div id="legend">
+            <div id="legendBar"></div>
+            <div>Young &larr; Age of oceanic crust (Myr) &rarr; Old</div>
+        </div>
+    </div>
     <div id="instructions"></div>
 
     <div id="regionBar">
@@ -167,20 +171,14 @@
 
     <div id="info">Loading data…</div>
 
-    <div id="legend">
-        <div id="legendBar"></div>
-        <div>Young &larr; Age of oceanic crust (Myr) &rarr; Old</div>
-    </div>
-
     <button id="lineModeButton" type="button">Line mode</button>
 
     <div id="citation">
-        Data: Seton, M., Müller, R. D., Zahirovic, S., Williams, S., Wright, N., Cannon, J.,
-        Whittaker, J., Matthews, K., McGirr, R. (2020).
-        <em>A global dataset of present-day oceanic crustal age and seafloor spreading parameters</em>.
-        <span>Geochemistry, Geophysics, Geosystems</span>, doi: 10.1029/2020GC009214.
+        Data:
         <a href="https://www.earthbyte.org/a-global-dataset-of-present-day-oceanic-crustal-age-and-seafloor-spreading-parameters/"
             target="_blank" rel="noopener noreferrer">EarthByte</a>
+        Coasts from <a href="https://www.naturalearthdata.com/downloads/110m-physical-vectors/110m-coastline/"
+            target="_blank" rel="noopener noreferrer">Natural Earth</a>.
     </div>
 
     <script>
