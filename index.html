@@ -90,6 +90,28 @@
             pointer-events: none;
             white-space: nowrap;
         }
+
+        #citation {
+            position: fixed;
+            left: 10px;
+            bottom: 10px;
+            max-width: 40vw;
+            padding: 4px 8px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            font-size: 11px;
+            border-radius: 4px;
+            line-height: 1.3;
+        }
+
+        #citation a {
+            color: #aad7ff;
+            text-decoration: none;
+        }
+
+        #citation a:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 
@@ -102,6 +124,14 @@
             <div>Young &larr; Age of oceanic crust (Myr) &rarr; Old</div>
         </div>
         <div id="instructions"></div>
+    </div>
+    <div id="citation">
+        Data: Seton, M., Müller, R. D., Zahirovic, S., Williams, S., Wright, N., Cannon, J.,
+        Whittaker, J., Matthews, K., McGirr, R. (2020).
+        <em>A global dataset of present-day oceanic crustal age and seafloor spreading parameters</em>.
+        <span>Geochemistry, Geophysics, Geosystems</span>, doi: 10.1029/2020GC009214.
+        <a href="https://www.earthbyte.org/a-global-dataset-of-present-day-oceanic-crustal-age-and-seafloor-spreading-parameters/"
+            target="_blank" rel="noopener noreferrer">EarthByte</a>
     </div>
 
     <script>
@@ -138,6 +168,8 @@
                 grid.latMin = Math.min(...lats);
                 grid.latMax = Math.max(...lats);
 
+                grid.latIncreasing = lats[0] < lats[lats.length - 1];
+
                 resizeCanvas();
                 window.addEventListener("resize", resizeCanvas);
                 canvas.addEventListener("mousemove", handleMouseMove);
@@ -153,65 +185,45 @@
 
             const rect = canvas.getBoundingClientRect();
 
-            // Make both canvases the same pixel size
+            // Canvas at screen size
             canvas.width = rect.width;
             canvas.height = rect.height;
-            mapCanvas.width = rect.width;
-            mapCanvas.height = rect.height;
+
+            // Offscreen canvas at data grid resolution
+            mapCanvas.width = grid.lon.length;   // number of columns
+            mapCanvas.height = grid.lat.length;  // number of rows
 
             renderMapToOffscreen();
             redraw();
         }
 
-
         function renderMapToOffscreen() {
             if (!grid) return;
 
-            const lons = grid.lon;
-            const lats = grid.lat;
             const data = grid.data;
-
-            const lonMin = grid.lonMin;
-            const lonMax = grid.lonMax;
-            const latMin = grid.latMin;
-            const latMax = grid.latMax;
-
-            const width = mapCanvas.width;
-            const height = mapCanvas.height;
+            const width = mapCanvas.width;   // = grid.lon.length
+            const height = mapCanvas.height; // = grid.lat.length
 
             mapCtx.clearRect(0, 0, width, height);
+            mapCtx.imageSmoothingEnabled = false;
 
             const maxAge = estimateMaxFinite(data, 200);
 
-            for (let j = 0; j < lats.length; j++) {
-                const lat = lats[j];
-                const latNext = lats[Math.min(j + 1, lats.length - 1)];
+            for (let j = 0; j < height; j++) {
+                const row = data[j];
 
-                // Map cropped lat range to full canvas height
-                const y1 = ((latMax - lat) / (latMax - latMin)) * height;
-                const y2 = ((latMax - latNext) / (latMax - latMin)) * height;
-                const yTop = Math.min(y1, y2);
-                const yBottom = Math.max(y1, y2);
-                const cellH = yBottom - yTop;
+                // If lat increases south->north, put the last row at the top
+                const y = grid.latIncreasing ? (height - 1 - j) : j;
 
-                for (let i = 0; i < lons.length; i++) {
-                    const age = data[j][i];
+                for (let i = 0; i < width; i++) {
+                    const age = row[i];
                     if (age === null || isNaN(age)) continue;
 
-                    const lon = lons[i];
-                    const lonNext = lons[Math.min(i + 1, lons.length - 1)];
-
-                    // Map cropped lon range to full canvas width
-                    const x1 = ((lon - lonMin) / (lonMax - lonMin)) * width;
-                    const x2 = ((lonNext - lonMin) / (lonMax - lonMin)) * width;
-                    const cellW = x2 - x1;
-
                     mapCtx.fillStyle = ageToColor(age, maxAge);
-                    mapCtx.fillRect(x1, yTop, cellW, cellH);
+                    mapCtx.fillRect(i, y, 1, 1);
                 }
             }
         }
-
 
 
         function drawAgeMap() {
@@ -290,9 +302,13 @@
             ctx.lineTo(x2, y2);
             ctx.stroke();
 
-            // ticks, evenly spaced along the line (excluding endpoints)
-            for (let k = 1; k <= tickCount; k++) {
-                const t = k / (tickCount + 1);   // 0..1
+            // Number of tick marks, including endpoints
+            const n = Math.max(tickCount, 2);   // enforce at least 2 (both ends)
+            const steps = n - 1;                // intervals between ticks
+
+            for (let k = 0; k < n; k++) {
+                // k = 0 → start; k = n-1 → end; others in between
+                const t = steps === 0 ? 0.5 : k / steps;
                 const px = x1 + dx * t;
                 const py = y1 + dy * t;
 
@@ -304,6 +320,7 @@
 
             ctx.restore();
         }
+
 
         function estimateMaxFinite(data, defaultMax) {
             let max = 0;
@@ -424,17 +441,20 @@
             if (e.key === "e" || e.key === "E") {
                 lineMode = true;
                 instructions.textContent = "Click and drag to draw a line across the Atlantic";
+                // Prevent the page from scrolling (esp. if focus is on body)
+                e.preventDefault();
                 return;
             }
 
-            // Up/down arrows adjust tick resolution (after a line exists)
+            // Only handle arrows when in line mode and a line exists
             if (!lineMode) return;
             if (!lineStart || !lineEnd) return;
 
             if (e.key === "ArrowUp") {
                 tickCount = Math.min(tickCount + 1, 100);
+                e.preventDefault();  // stop page from scrolling up
             } else if (e.key === "ArrowDown") {
-                tickCount = Math.max(tickCount - 1, 1);
+                tickCount = Math.max(tickCount - 1, 2);  // at least 2 ticks (both ends)
             } else {
                 return;
             }
@@ -445,6 +465,7 @@
 
             redraw();
         });
+
 
 
         function nearestIndex(arr, value) {
@@ -474,12 +495,16 @@
             const height = canvas.height;
 
             ctx.clearRect(0, 0, width, height);
-            ctx.drawImage(mapCanvas, 0, 0, width, height); // no extra scaling
+
+            // Smoothly scale the grid image to the view size
+            ctx.imageSmoothingEnabled = true;
+            ctx.drawImage(mapCanvas, 0, 0, width, height);
 
             if (lineStart && lineEnd) {
                 drawLineWithTicks();
             }
         }
+
 
 
     </script>
